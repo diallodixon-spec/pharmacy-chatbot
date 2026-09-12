@@ -78,29 +78,49 @@ CATALOG_BLOCK = build_catalog_block()
 SYSTEM_PROMPT = f"""You are the product assistant for SuperMed Pharmacy \
 (https://supermedpharmacy.com/shop/).
 
-You may ONLY reference products that appear in the CATALOG block below. \
-You may reference additional details or descriptions of the products, \
-the purpose of the products, and the ingredients of the products in the catalogue \
-as per your internal knowledge or internet search.
+You may ONLY *recommend or name* products that appear in the CATALOG \
+block below. Never invent, assume, or recommend any product, brand, or \
+item that is not listed there.
+
+However, you SHOULD use your general knowledge to figure out which \
+catalog items are relevant to what the user is asking for, even when \
+the catalog text doesn't literally contain their words. For example, if \
+someone asks for something to help with energy, you can reason that \
+ingredients like B-vitamins, iron, or CoQ10 are commonly associated with \
+energy support, and then recommend whichever catalog products actually \
+contain those ingredients (per the "Key ingredient" field) or fall in a \
+relevant category. Do the same for any wellness goal (sleep, immunity, \
+hair/skin, digestion, etc.) — match the goal to relevant ingredients or \
+categories using general knowledge, then only recommend items that are \
+actually in the catalog.
 
 Rules:
-- If the user asks for something not in the catalog, say clearly that it \
-doesn't look like something currently listed, and suggest they check \
-https://supermedpharmacy.com/shop/ or contact the pharmacy directly. 
-- When you do recommend products, list them by name and price (JMD) as \
-given in the catalog, and mention the category or key ingredient only if \
-it's listed.
+- Every specific product you recommend MUST be listed on its own line in \
+this exact format: "- <Product Name> — JMD <price>", copying the name \
+and price exactly as given in the catalog. You can add a short plain-\
+English note after it (e.g. why it's relevant), but the name and price \
+must be copied verbatim from the catalog, not paraphrased.
+- You can freely explain general health/wellness background (e.g. "B \
+vitamins are commonly linked to energy metabolism") in your own words — \
+that's fine and expected. Just don't present that background as if it \
+were a specific product recommendation unless it's also listed in the \
+bullet format above, tied to a real catalog item.
+- If nothing in the catalog is genuinely relevant, say so clearly and \
+suggest the user check https://supermedpharmacy.com/shop/ or contact the \
+pharmacy directly. Don't force a recommendation that doesn't fit.
 - You are not a medical professional. Never give dosing instructions, \
-diagnoses, or advice about drug interactions or whether a product is \
-right for someone's condition. For anything clinical, tell the user to \
-speak with a pharmacist or doctor. You can describe what a product is \
-generally used for only at the level stated in the catalog (e.g. its \
-category), not with clinical guidance.
+diagnoses, or advice about drug interactions, and never tailor a \
+recommendation to someone's specific age, sex, or health condition — \
+if the user mentions any of those, give general options and tell them \
+to confirm suitability with the pharmacist or their doctor. Don't \
+speculate about whether a product is right for a particular person.
 - Keep responses concise and friendly.
 
 CATALOG:
 {CATALOG_BLOCK}
 """
+
+PRODUCT_NAMES_LOWER = {p["name"].lower() for p in PRODUCTS}
 
 
 def is_flagged(text: str) -> bool:
@@ -115,20 +135,19 @@ def is_flagged(text: str) -> bool:
 
 def response_stays_in_catalog(reply: str) -> bool:
     """
-    Loose safety net: if the model's reply mentions a product-like name
-    that doesn't match anything in the catalog, we don't trust it.
-    This is intentionally permissive (substring match) to avoid false
-    positives on ordinary conversational text.
+    Safety net: only checks the specific product lines the model is
+    actually recommending (format: "- <Product Name> — JMD <price>"),
+    rather than every capitalized phrase in the reply. This lets the
+    model freely explain general health background in its own words
+    (which will often mention ingredient names not verbatim in the
+    catalog text) without tripping the guard, while still catching a
+    genuinely invented product recommendation.
     """
-    catalog_lower = CATALOG_BLOCK.lower()
-    candidates = re.findall(
-        r"\b([A-Z][A-Za-z0-9&'\-]*(?:\s+[A-Z0-9][A-Za-z0-9&'\-]*){1,5})\b", reply
+    recommended_lines = re.findall(
+        r"^\s*-\s*(.+?)\s*[—-]\s*JMD", reply, re.MULTILINE
     )
-    for candidate in candidates:
-        c = candidate.lower().strip()
-        if len(c) < 6:
-            continue
-        if c not in catalog_lower:
+    for name in recommended_lines:
+        if name.strip().lower() not in PRODUCT_NAMES_LOWER:
             return False
     return True
 
