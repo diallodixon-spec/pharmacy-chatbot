@@ -15,13 +15,19 @@ Guardrails in place:
      that isn't in the catalog, we discard that response and fall back
      to a safe canned reply instead of returning it to the user.
   4. The model is explicitly told not to give medical/dosing advice.
+
+This is a FastAPI ASGI app in api/index.py, which is one of Vercel's
+default Python entrypoint locations (the file must define a top-level
+`app` variable for ASGI/WSGI frameworks — see
+https://vercel.com/docs/functions/runtimes/python).
 """
 
-import json
 import os
 import re
-from http.server import BaseHTTPRequestHandler
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from openai import OpenAI
 
 from catalog_data import PRODUCTS
@@ -108,8 +114,9 @@ def response_stays_in_catalog(reply: str) -> bool:
     positives on ordinary conversational text.
     """
     catalog_lower = CATALOG_BLOCK.lower()
-    # Look for capitalized multi-word phrases that might be product names
-    candidates = re.findall(r"\b([A-Z][A-Za-z0-9&'\-]*(?:\s+[A-Z0-9][A-Za-z0-9&'\-]*){1,5})\b", reply)
+    candidates = re.findall(
+        r"\b([A-Z][A-Za-z0-9&'\-]*(?:\s+[A-Z0-9][A-Za-z0-9&'\-]*){1,5})\b", reply
+    )
     for candidate in candidates:
         c = candidate.lower().strip()
         if len(c) < 6:
@@ -148,43 +155,33 @@ def generate_reply(message: str, history: list) -> str:
     return reply
 
 
-class handler(BaseHTTPRequestHandler):
-    def _set_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+class ChatTurn(BaseModel):
+    role: str
+    content: str
 
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self._set_cors_headers()
-        self.end_headers()
 
-    def do_POST(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length) or b"{}")
-            message = (body.get("message") or "").strip()
-            history = body.get("history") or []
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatTurn] = []
 
-            if not message:
-                self.send_response(400)
-                self._set_cors_headers()
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "message is required"}).encode())
-                return
 
-            reply = generate_reply(message, history)
+app = FastAPI()
 
-            self.send_response(200)
-            self._set_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"reply": reply}).encode())
+# Narrow this to https://supermedpharmacy.com before going live.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
-        except Exception as e:
-            self.send_response(500)
-            self._set_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+@app.post("/api/chat")
+def chat(req: ChatRequest):
+    message = req.message.strip()
+    if not message:
+        return {"error": "message is required"}
+
+    history = [turn.model_dump() for turn in req.history]
+    reply = generate_reply(message, history)
+    return {"reply": reply}

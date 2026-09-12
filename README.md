@@ -8,9 +8,13 @@ Python serverless function on Vercel, using OpenAI for chat + moderation.
 - `api/catalog_data.py` holds the full product catalog (345 products),
   generated from the product CSV. It's loaded directly into the model's
   system prompt on every request — no vector DB needed at this catalog size.
-- `api/chat.py` is the serverless function: it moderates the incoming
-  message, sends it + the catalog to OpenAI, checks the reply only
-  mentions catalog products, and returns it.
+- `api/index.py` is a small FastAPI app exposing `POST /api/chat`: it
+  moderates the incoming message, sends it + the catalog to OpenAI,
+  checks the reply only mentions catalog products, and returns it.
+  (Vercel's Python runtime requires the entrypoint file to be named
+  `app.py`/`index.py`/`main.py`/etc. and export a top-level `app`
+  variable — that's why the app lives in `api/index.py` rather than
+  `api/chat.py`.)
 - `public/index.html` is a bare-bones test page so you can try the bot
   before embedding it in the real site.
 
