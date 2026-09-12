@@ -1,0 +1,5 @@
+.env
+.env.local
+.vercel
+__pycache__/
+*.pyc
