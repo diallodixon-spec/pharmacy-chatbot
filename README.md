@@ -5,16 +5,20 @@ Python serverless function on Vercel, using OpenAI for chat + moderation.
 
 ## How it works
 
-- `api/catalog_data.py` holds the full product catalog (345 products),
-  generated from the product CSV. It's loaded directly into the model's
-  system prompt on every request — no vector DB needed at this catalog size.
-- `api/index.py` is a small FastAPI app exposing `POST /api/chat`: it
+- `api/index.py` is a small FastAPI app exposing `POST /api/chat`. It
   moderates the incoming message, sends it + the catalog to OpenAI,
   checks the reply only mentions catalog products, and returns it.
   (Vercel's Python runtime requires the entrypoint file to be named
   `app.py`/`index.py`/`main.py`/etc. and export a top-level `app`
-  variable — that's why the app lives in `api/index.py` rather than
-  `api/chat.py`.)
+  variable — that's why the app lives in `api/index.py`.)
+- The full product catalog (345 products) is embedded **directly inside
+  `api/index.py`** as a JSON literal (`PRODUCTS = json.loads(r'''...''')`),
+  not imported from a separate file. Vercel's Python bundler doesn't
+  reliably resolve a plain sibling-module import (`from catalog_data
+  import PRODUCTS`) for the function entrypoint, so keeping everything
+  self-contained in one file avoids that failure mode. It's loaded
+  directly into the model's system prompt on every request — no vector
+  DB needed at this catalog size.
 - `public/index.html` is a bare-bones test page so you can try the bot
   before embedding it in the real site.
 
@@ -49,7 +53,8 @@ same columns as the current one, then run:
 python3 build_catalog.py path/to/updated_products.csv
 ```
 
-This regenerates `api/catalog_data.py`. Redeploy (`vercel --prod`) to
+This finds and replaces the embedded `PRODUCTS` block inside
+`api/index.py` in place. Commit and push (or run `vercel --prod`) to
 push the update live.
 
 ## Embedding on the real WordPress site
